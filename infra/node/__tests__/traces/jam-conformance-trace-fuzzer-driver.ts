@@ -39,9 +39,8 @@ loadEnv()
 
 import * as net from 'node:net'
 import * as path from 'node:path'
-import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 
-import { decodeFuzzMessage, encodeFuzzMessage } from '@pbnjam/codec'
 import { type Hex, logger } from '@pbnjam/core'
 import {
   type BlockTraceTestVector,
@@ -53,6 +52,11 @@ import {
 } from '@pbnjam/types'
 
 import { ConfigService } from '../../services/config-service'
+import {
+  buildPeerInfo,
+  readFuzzMessage,
+  sendFuzzMessage,
+} from './fuzzer-transport'
 import {
   convertJsonBlockToBlock,
   convertJsonHeaderToBlockHeader,
@@ -100,92 +104,6 @@ function getTraceId(): string | null {
   }
 
   return null
-}
-
-// Minimal length-prefixed transport helpers (mirror fuzzer-target)
-function sendRawMessage(socket: net.Socket, message: Uint8Array): void {
-  if (socket.destroyed || !socket.writable) {
-    console.warn('Cannot send message: socket is destroyed or not writable')
-    return
-  }
-  const lengthBytes = Buffer.alloc(4)
-  lengthBytes.writeUInt32LE(message.length, 0)
-  socket.write(Buffer.concat([lengthBytes, Buffer.from(message)]))
-}
-
-function readRawMessage(socket: net.Socket): Promise<Uint8Array> {
-  return new Promise((resolve, reject) => {
-    let lengthBytes = Buffer.alloc(0)
-    let expectedLength = 0
-
-    const cleanup = () => {
-      socket.removeListener('data', onData)
-      socket.removeListener('error', onError)
-      socket.removeListener('close', onClose)
-      socket.removeListener('end', onClose)
-    }
-
-    const onData = (data: Buffer) => {
-      lengthBytes = Buffer.concat([lengthBytes, data])
-
-      if (lengthBytes.length < 4) {
-        return
-      }
-
-      if (expectedLength === 0) {
-        expectedLength = lengthBytes.readUInt32LE(0)
-        lengthBytes = lengthBytes.subarray(4)
-      }
-
-      if (lengthBytes.length >= expectedLength) {
-        const payload = new Uint8Array(lengthBytes.subarray(0, expectedLength))
-        cleanup()
-        resolve(payload)
-      }
-    }
-
-    const onError = (error: Error) => {
-      cleanup()
-      reject(error)
-    }
-
-    const onClose = () => {
-      cleanup()
-      reject(new Error('Socket closed before message was fully received'))
-    }
-
-    socket.on('data', onData)
-    socket.on('error', onError)
-    socket.on('close', onClose)
-    socket.on('end', onClose)
-  })
-}
-
-async function sendFuzzMessage(
-  socket: net.Socket,
-  msg: FuzzMessage,
-  codecConfig: ConfigService,
-): Promise<void> {
-  const encoded = encodeFuzzMessage(msg, codecConfig)
-  sendRawMessage(socket, encoded)
-}
-
-async function readFuzzMessage(
-  socket: net.Socket,
-  codecConfig: ConfigService,
-): Promise<FuzzMessage> {
-  const data = await readRawMessage(socket)
-  return decodeFuzzMessage(data, codecConfig)
-}
-
-function buildPeerInfo(jamVersion: JamVersion): FuzzPeerInfo {
-  return {
-    fuzz_version: 1,
-    fuzz_features: 0,
-    jam_version: jamVersion,
-    app_version: { major: 0, minor: 0, patch: 1 },
-    app_name: 'pbnj-trace-fuzzer-driver',
-  }
 }
 
 function logStateRootResponse(
@@ -317,7 +235,7 @@ async function main() {
 
   try {
     // 1) Send PeerInfo
-    const peerInfo: FuzzPeerInfo = buildPeerInfo(jamVersion)
+    const peerInfo: FuzzPeerInfo = buildPeerInfo(jamVersion, 'pbnj-trace-fuzzer-driver')
     const peerInfoMsg: FuzzMessage = {
       type: FuzzMessageType.PeerInfo,
       payload: peerInfo,

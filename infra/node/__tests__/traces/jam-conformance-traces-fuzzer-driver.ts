@@ -60,7 +60,6 @@ import * as net from 'node:net'
 import * as path from 'node:path'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 
-import { decodeFuzzMessage, encodeFuzzMessage } from '@pbnjam/codec'
 import { logger } from '@pbnjam/core'
 import {
   type BlockTraceTestVector,
@@ -71,6 +70,11 @@ import {
 } from '@pbnjam/types'
 
 import { ConfigService } from '../../services/config-service'
+import {
+  buildPeerInfo,
+  readFuzzMessage,
+  sendFuzzMessage,
+} from './fuzzer-transport'
 import {
   convertJsonBlockToBlock,
   convertJsonHeaderToBlockHeader,
@@ -190,91 +194,6 @@ function getTraceDirsWithBlockFiles(roots: string[]): Map<string, string[]> {
     }
   }
   return traceFilesByDir
-}
-
-/** Send one message (length-prefixed). Resolves when the write has been flushed. */
-function sendRawMessage(socket: net.Socket, message: Uint8Array): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (socket.destroyed || !socket.writable) {
-      reject(new Error('Socket not writable'))
-      return
-    }
-    const lengthBytes = Buffer.alloc(4)
-    lengthBytes.writeUInt32LE(message.length, 0)
-    socket.write(
-      Buffer.concat([lengthBytes, Buffer.from(message)]),
-      (err) => (err ? reject(err) : resolve()),
-    )
-  })
-}
-
-function readRawMessage(socket: net.Socket): Promise<Uint8Array> {
-  return new Promise((resolve, reject) => {
-    let lengthBytes = Buffer.alloc(0)
-    let expectedLength = 0
-
-    const cleanup = () => {
-      socket.removeListener('data', onData)
-      socket.removeListener('error', onError)
-      socket.removeListener('close', onClose)
-      socket.removeListener('end', onClose)
-    }
-
-    const onData = (data: Buffer) => {
-      lengthBytes = Buffer.concat([lengthBytes, data])
-      if (lengthBytes.length < 4) return
-      if (expectedLength === 0) {
-        expectedLength = lengthBytes.readUInt32LE(0)
-        lengthBytes = lengthBytes.subarray(4)
-      }
-      if (lengthBytes.length >= expectedLength) {
-        cleanup()
-        resolve(new Uint8Array(lengthBytes.subarray(0, expectedLength)))
-      }
-    }
-
-    const onError = (error: Error) => {
-      cleanup()
-      reject(error)
-    }
-    const onClose = () => {
-      cleanup()
-      reject(new Error('Socket closed before message was fully received'))
-    }
-
-    socket.on('data', onData)
-    socket.on('error', onError)
-    socket.on('close', onClose)
-    socket.on('end', onClose)
-  })
-}
-
-/** Send one fuzz message. We await write completion, then caller must await readFuzzMessage before sending again (strict request-response; no next trace until current answers). */
-async function sendFuzzMessage(
-  socket: net.Socket,
-  msg: FuzzMessage,
-  codecConfig: ConfigService,
-): Promise<void> {
-  const encoded = encodeFuzzMessage(msg, codecConfig)
-  await sendRawMessage(socket, encoded)
-}
-
-async function readFuzzMessage(
-  socket: net.Socket,
-  codecConfig: ConfigService,
-): Promise<FuzzMessage> {
-  const data = await readRawMessage(socket)
-  return decodeFuzzMessage(data, codecConfig)
-}
-
-function buildPeerInfo(jamVersion: JamVersion): FuzzPeerInfo {
-  return {
-    fuzz_version: 1,
-    fuzz_features: 0,
-    jam_version: jamVersion,
-    app_version: { major: 0, minor: 0, patch: 1 },
-    app_name: 'pbnj-traces-fuzzer-driver',
-  }
 }
 
 /** Called after each block response; blockNum is 1-based, totalBlocks is total for this trace. */
@@ -475,7 +394,7 @@ async function main() {
   console.log(`🔌 Fuzzer target: ${socketPath}`)
 
   const results: TraceResult[] = []
-  const peerInfo = buildPeerInfo(jamVersion)
+  const peerInfo = buildPeerInfo(jamVersion, 'pbnj-traces-fuzzer-driver')
 
   // One connection for all traces (same as single-trace driver): connect once,
   // PeerInfo once, then for each trace Initialize + ImportBlocks. No disconnect
