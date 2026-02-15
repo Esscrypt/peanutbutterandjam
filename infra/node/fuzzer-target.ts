@@ -611,6 +611,46 @@ function resetForNewTrace(): void {
   workReportService.clearPendingReports()
 }
 
+const CHAPTER_10_KEY =
+  '0x0a000000000000000000000000000000000000000000000000000000000000' as Hex
+const CHAPTER_11_KEY =
+  '0x0b000000000000000000000000000000000000000000000000000000000000' as Hex
+
+/**
+ * Apply C(10) work reports and C(11) thetime from keyvals to services.
+ * Used by both Initialize and ImportBlock.initial_state so decoding and state
+ * mutation stay in one place (e.g. uint32 decoding for thetime).
+ */
+function applyChapter10And11FromKeyvals(
+  keyvals: Array<{ key: string; value?: Hex }>,
+): void {
+  const reportsKeyval = keyvals.find((kv) => kv.key === CHAPTER_10_KEY)
+  if (reportsKeyval?.value) {
+    const reportsData = hexToBytes(reportsKeyval.value)
+    const [decodeError, decodeResult] = decodeStateWorkReports(
+      reportsData,
+      configService,
+    )
+    if (!decodeError && decodeResult) {
+      workReportService.setPendingReports(decodeResult.value)
+    }
+  }
+
+  const thetimeKeyval = keyvals.find((kv) => kv.key === CHAPTER_11_KEY)
+  if (thetimeKeyval?.value) {
+    const thetimeBytes = hexToBytes(thetimeKeyval.value)
+    const thetimeU32 =
+      (thetimeBytes[0]! |
+        (thetimeBytes[1]! << 8) |
+        (thetimeBytes[2]! << 16) |
+        (thetimeBytes[3]! << 24)) >>>
+      0
+    accumulationService.setLastProcessedSlot(BigInt(thetimeU32))
+  } else {
+    accumulationService.setLastProcessedSlot(null)
+  }
+}
+
 // Handle Initialize request
 async function handleInitialize(
   socket: UnixSocket,
@@ -635,43 +675,10 @@ async function handleInitialize(
     }
     logger.debug(`Initialize: State set successfully`)
 
-    // Initialize pending work reports from C(10) (same as jam-conformance-trace-single-rust.test.ts).
+    // Initialize pending work reports from C(10) and C(11) thetime (same as jam-conformance-trace-single-rust.test.ts).
     // Gray Paper Eq. 296-298: Core must not be engaged (no pending report). Critical for CORE_ENGAGED validation.
-    const chapter10Key =
-      '0x0a000000000000000000000000000000000000000000000000000000000000' as Hex
-    const reportsKeyval = init.keyvals.find(
-      (kv: { key: string }) => kv.key === chapter10Key,
-    )
-    if (reportsKeyval?.value) {
-      const reportsData = hexToBytes(reportsKeyval.value as Hex)
-      const [decodeError, decodeResult] = decodeStateWorkReports(
-        reportsData,
-        configService,
-      )
-      if (!decodeError && decodeResult) {
-        workReportService.setPendingReports(decodeResult.value)
-      }
-    }
-
-    // Sync accumulationService.lastProcessedSlot from C(11) thetime (same as in-process trace tests).
-    // lastProcessedSlot is not part of the state trie; shiftStateForBlockTransition uses it for ready queue.
-    const chapter11Key =
-      '0x0b000000000000000000000000000000000000000000000000000000000000' as Hex
-    const thetimeKeyval = init.keyvals.find(
-      (kv: { key: string }) => kv.key === chapter11Key,
-    )
-    if (thetimeKeyval?.value) {
-      const thetimeBytes = hexToBytes(thetimeKeyval.value as Hex)
-      const thetime = BigInt(
-        thetimeBytes[0] |
-          (thetimeBytes[1]! << 8) |
-          (thetimeBytes[2]! << 16) |
-          (thetimeBytes[3]! << 24),
-      )
-      accumulationService.setLastProcessedSlot(thetime)
-    } else {
-      accumulationService.setLastProcessedSlot(null)
-    }
+    // lastProcessedSlot from C(11) is not part of the state trie; shiftStateForBlockTransition uses it for ready queue.
+    applyChapter10And11FromKeyvals(init.keyvals)
 
     // Generate state trie for genesis header initialization
     const [genesisTrieError, genesisTrie] = stateService.generateStateTrie()
@@ -809,38 +816,7 @@ async function handleImportBlock(
           `Implicit init from ImportBlock.initial_state: setState warning: ${setStateError.message}`,
         )
       }
-      const chapter10Key =
-        '0x0a000000000000000000000000000000000000000000000000000000000000' as Hex
-      const reportsKeyval = importBlock.initial_state.keyvals.find(
-        (kv: { key: string }) => kv.key === chapter10Key,
-      )
-      if (reportsKeyval?.value) {
-        const reportsData = hexToBytes(reportsKeyval.value as Hex)
-        const [decodeError, decodeResult] = decodeStateWorkReports(
-          reportsData,
-          configService,
-        )
-        if (!decodeError && decodeResult) {
-          workReportService.setPendingReports(decodeResult.value)
-        }
-      }
-      const chapter11Key =
-        '0x0b000000000000000000000000000000000000000000000000000000000000' as Hex
-      const thetimeKeyval = importBlock.initial_state.keyvals.find(
-        (kv: { key: string }) => kv.key === chapter11Key,
-      )
-      if (thetimeKeyval?.value) {
-        const thetimeBytes = hexToBytes(thetimeKeyval.value as Hex)
-        const thetime = BigInt(
-          thetimeBytes[0]! |
-            (thetimeBytes[1]! << 8) |
-            (thetimeBytes[2]! << 16) |
-            (thetimeBytes[3]! << 24),
-        )
-        accumulationService.setLastProcessedSlot(thetime)
-      } else {
-        accumulationService.setLastProcessedSlot(null)
-      }
+      applyChapter10And11FromKeyvals(importBlock.initial_state.keyvals)
       const [genesisTrieError, genesisTrie] = stateService.generateStateTrie()
       if (genesisTrieError || !genesisTrie) {
         const err =
