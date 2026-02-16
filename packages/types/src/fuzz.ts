@@ -88,8 +88,19 @@ export interface Initialize {
   ancestry: Ancestry
 }
 
+/**
+ * Optional initial state for ImportBlock when no prior Initialize was sent.
+ * Parent is inferred from block.header.parent; target creates that node with this state.
+ */
+export interface ImportBlockInitialState {
+  keyvals: FuzzState
+  ancestry?: Ancestry
+}
+
 export interface ImportBlock {
   block: Block
+  /** When set and target not initialized: set state and create parent node, then import block. */
+  initial_state?: ImportBlockInitialState
 }
 
 export interface GetState {

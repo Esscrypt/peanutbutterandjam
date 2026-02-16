@@ -170,13 +170,10 @@ export function convertJsonReportToWorkReport(jsonReport: any): WorkReport {
 }
 
 /**
- * Helper function to convert JSON block to Block type
+ * Convert JSON header (e.g. from genesis.json or block trace) to BlockHeader.
  */
-export function convertJsonBlockToBlock(jsonBlock: any): Block {
-  const jsonHeader = jsonBlock.header
-  const jsonExtrinsic = jsonBlock.extrinsic
-
-  const blockHeader: BlockHeader = {
+export function convertJsonHeaderToBlockHeader(jsonHeader: any): BlockHeader {
+  return {
     parent: jsonHeader.parent,
     priorStateRoot: jsonHeader.parent_state_root,
     extrinsicHash: jsonHeader.extrinsic_hash,
@@ -202,6 +199,16 @@ export function convertJsonBlockToBlock(jsonBlock: any): Block {
     vrfSig: jsonHeader.entropy_source,
     sealSig: jsonHeader.seal,
   }
+}
+
+/**
+ * Helper function to convert JSON block to Block type
+ */
+export function convertJsonBlockToBlock(jsonBlock: any): Block {
+  const jsonHeader = jsonBlock.header
+  const jsonExtrinsic = jsonBlock.extrinsic
+
+  const blockHeader: BlockHeader = convertJsonHeaderToBlockHeader(jsonHeader)
 
   const blockBody: BlockBody = {
     tickets: jsonExtrinsic.tickets.map((ticket: any) => ({
