@@ -49,10 +49,26 @@ export function applyAccumulationResultsToState(
       const { poststate } = result.value
       const partialStateServicesForThisInvocation =
         partialStateAccountsPerInvocation?.get(i)
+      const accumulatedServiceId = accumulatedServiceIds[i]
+
       if (partialStateServicesForThisInvocation) {
+        // Read manager from poststate to check authority
+        // Gray Paper: Only Manager or Self can eject a service
+        const managerId = poststate.manager
         for (const serviceId of partialStateServicesForThisInvocation) {
           if (!poststate.accounts.has(serviceId)) {
-            ejectedServices.add(serviceId)
+            // Authority Check: Is the actor allowed to eject this service?
+            // - If Actor == Manager: Yes (Manager can eject anyone)
+            // - If Actor == Self: Yes (Self-destruct)
+            // - If Actor == Other: No (Cannot eject dependencies)
+            //
+            // If the service is missing but the actor lacks authority, it's an OMISSION (Rust PVM optimization), not an EJECTION.
+            if (
+              accumulatedServiceId === managerId ||
+              accumulatedServiceId === serviceId
+            ) {
+              ejectedServices.add(serviceId)
+            }
           }
         }
       }
@@ -76,7 +92,16 @@ export function applyAccumulationResultsToState(
       const [existingAccountError] =
         serviceAccountsService.getServiceAccount(accumulatedServiceId)
       const alreadyDeleted = !!existingAccountError
-      if (accumulatedAccount && !alreadyDeleted) {
+      // Gray Paper eq 213-214: accounts' = (accounts ∪ n) \ m
+      // m is the union of all services removed by ANY invocation in the batch.
+      // If a service is in ejectedServices (i.e. in m), it must be fully removed
+      // regardless of whether its own invocation returned a poststate containing itself.
+      // Skip writing the account back; the final cleanup loop will delete it.
+      if (
+        accumulatedAccount &&
+        !alreadyDeleted &&
+        !ejectedServices.has(accumulatedServiceId)
+      ) {
         // Gray Paper equation 410-412: lastacc is updated AFTER all accumulation iterations complete
         // ONLY if service is in accumulationStatistics (i.e., had work items or used gas)
         // Services that only receive transfers without executing code should NOT have lastacc updated
@@ -84,27 +109,11 @@ export function applyAccumulationResultsToState(
           accumulatedServicesForLastacc.add(accumulatedServiceId)
         }
 
-        const reusedAfterEject = ejectedServices.has(accumulatedServiceId)
-        if (reusedAfterEject) {
-          // Re-use after eject: apply accumulated poststate (balance, octets, items, etc.)
-          // then clear keyvals so the tombstone has the correct metadata from accumulation.
-          serviceAccountsService.setServiceAccount(
-            accumulatedServiceId,
-            accumulatedAccount,
-          )
-          serviceAccountsService.clearKeyvalsAndMarkEjected(
-            accumulatedServiceId,
-          )
-          updatedAccounts.add(accumulatedServiceId)
-          ejectedServices.delete(accumulatedServiceId)
-        } else {
-          // Normal case: apply accumulated poststate.
-          serviceAccountsService.setServiceAccount(
-            accumulatedServiceId,
-            accumulatedAccount,
-          )
-          updatedAccounts.add(accumulatedServiceId)
-        }
+        serviceAccountsService.setServiceAccount(
+          accumulatedServiceId,
+          accumulatedAccount,
+        )
+        updatedAccounts.add(accumulatedServiceId)
       }
 
       // Handle newly created services (services in poststate but not in updatedAccounts)
@@ -233,7 +242,8 @@ export function applyAccumulationResultsToState(
     }
   }
 
-  // Delete only services still in ejectedServices (we removed re-added ones in Pass 2).
+  // Gray Paper eq 213-214: accounts' = (accounts ∪ n) \ m
+  // Unconditionally delete all ejected services. m wins over n.
   for (const ejectedServiceId of ejectedServices) {
     serviceAccountsService.deleteServiceAccount(ejectedServiceId)
   }
