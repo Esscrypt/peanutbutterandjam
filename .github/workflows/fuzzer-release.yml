@@ -22,9 +22,10 @@ jobs:
         run: |
           git submodule update --init --depth 1 packages/bandersnatch
           git submodule update --init --depth 1 packages/bandersnatch-vrf
-          # ark-vrf is a nested submodule inside bandersnatch-vrf; required to
-          # compile the ring-proof + IETF VRF native Rust module.
-          git -C packages/bandersnatch-vrf submodule update --init --depth 1 submodules/ark-vrf
+          # ark-vrf is a top-level monorepo submodule (submodules/ark-vrf).
+          # Cargo.toml in rust-ring-proof references it via path = "../../../submodules/ark-vrf"
+          # which resolves to the monorepo root, so it must be initialised here.
+          git submodule update --init --depth 1 submodules/ark-vrf
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -45,13 +46,19 @@ jobs:
       - name: Build dependencies
         run: bun run build
 
+      - name: Build pvm-rust native (PVM)
+        run: bun run --cwd packages/pvm-rust build
+
       - name: Build bandersnatch-vrf native (ring proof + IETF VRF)
-        # The turbo build above compiles TypeScript only; this step explicitly
-        # builds the napi-rs native addon (RingVRFProverW3F / IETFVRFProverW3F).
         run: bun run --cwd packages/bandersnatch-vrf build:native
 
       - name: Build fuzzer target binary
-        run: bun run build:fuzzer
+        run: |
+          bun build ./infra/node/fuzzer-target.ts --compile --outfile ./bin/fuzzer-target --minify --target bun
+          cp .env.example bin/.env
+
+      - name: Copy pvm-rust native to bin
+        run: cp -r packages/pvm-rust/native bin/
 
       - name: Copy bandersnatch-vrf native to bin
         # The compiled binary resolves `require('../../rust-ring-proof/native')`
