@@ -886,7 +886,7 @@ function collectServiceProfile(timeslot: bigint): void {
   }
 
   try {
-    appendFileSync(MEM_PROFILE_LOG, JSON.stringify(row) + '\n')
+    appendFileSync(MEM_PROFILE_LOG, `${JSON.stringify(row)}\n`)
   } catch {
     // Non-fatal: don't let profiling break the fuzzer
   }
