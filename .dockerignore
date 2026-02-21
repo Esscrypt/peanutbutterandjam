@@ -104,8 +104,12 @@ test/snapshots/
 .gitignore
 .gitattributes
 
-# submodules (not needed for fuzzer target)
+# submodules — exclude most, but keep ark-vrf source (Cargo path dependency for
+# ring-proof native module: rust-ring-proof/Cargo.toml path = "../../../submodules/ark-vrf").
+# Exclude ark-vrf/target/ to avoid copying gigabytes of local Rust build cache.
 submodules/
+!submodules/ark-vrf/
+submodules/ark-vrf/target/
 
 # test files and traces
 pvm-traces/

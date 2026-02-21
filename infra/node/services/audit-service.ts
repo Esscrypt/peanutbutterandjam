@@ -23,6 +23,7 @@ import {
 } from '@pbnjam/audit'
 import type {
   IETFVRFVerifier,
+  IETFVRFVerifierW3F,
   IETFVRFVerifierWasm,
 } from '@pbnjam/bandersnatch-vrf'
 import {
@@ -59,7 +60,10 @@ export class AuditService extends BaseService {
   private readonly auditAnnouncementProtocol: AuditAnnouncementProtocol | null
   private readonly configService: IConfigService
   private readonly keyPairService: KeyPairService | null
-  private readonly verifier: IETFVRFVerifier | IETFVRFVerifierWasm
+  private readonly verifier:
+    | IETFVRFVerifier
+    | IETFVRFVerifierWasm
+    | IETFVRFVerifierW3F
   private currentTranche = 0
 
   constructor(options: {
@@ -70,7 +74,7 @@ export class AuditService extends BaseService {
     auditAnnouncementProtocol?: AuditAnnouncementProtocol | null
     configService: IConfigService
     keyPairService?: KeyPairService | null
-    verifier: IETFVRFVerifier | IETFVRFVerifierWasm
+    verifier: IETFVRFVerifier | IETFVRFVerifierWasm | IETFVRFVerifierW3F
   }) {
     super('audit-service')
     this.eventBusService = options.eventBusService

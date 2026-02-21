@@ -7,6 +7,10 @@ This guide explains how to build and publish the fuzzer target as a Docker image
 - Docker installed and running
 - Access to a container registry (Docker Hub, GitHub Container Registry, etc.)
 - Git repository with the fuzzer target code
+- **`submodules/ark-vrf` must be initialised** — the ring-proof native module (`RingVRFProverW3F` / `IETFVRFProverW3F`) depends on it via a Cargo path dependency. Run once before `docker build`:
+  ```bash
+  git submodule update --init --depth 1 submodules/ark-vrf
+  ```
 
 ## Building the Docker Image
 

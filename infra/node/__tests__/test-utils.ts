@@ -413,6 +413,7 @@ export async function initializeServices(options?: {
   useRust?: boolean
   enableNetworking?: boolean,
   useIetfVrfWasm?: boolean,
+  useIetfVrfW3F?: boolean,
   useRingVrfWasm?: boolean,
   networking?: {
     listenAddress: string
@@ -432,6 +433,7 @@ export async function initializeServices(options?: {
     networking,
     useIetfVrfWasm,
     useRingVrfWasm,
+    useIetfVrfW3F,
   } = options || {}
 
   // Create services using the factory
@@ -442,6 +444,7 @@ export async function initializeServices(options?: {
     useRust,
     useRingVrfWasm,
     useIetfVrfWasm,
+    useIetfVrfW3F,
     initialValidators,
     enableNetworking: false,
     networking,

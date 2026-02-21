@@ -8,7 +8,8 @@
 import path from 'node:path'
 import {
   type IETFVRFVerifier,
-  IETFVRFVerifierWasm,
+  IETFVRFVerifierW3F,
+  type IETFVRFVerifierWasm,
   RingVRFProverWasm,
   RingVRFVerifierWasm,
 } from '@pbnjam/bandersnatch-vrf'
@@ -165,7 +166,10 @@ export class MainService extends BaseService {
 
   private readonly ringProver: RingVRFProverWasm
   private readonly ringVerifier: RingVRFVerifierWasm
-  private readonly ietfVerifier: IETFVRFVerifier | IETFVRFVerifierWasm
+  private readonly ietfVerifier:
+    | IETFVRFVerifier
+    | IETFVRFVerifierWasm
+    | IETFVRFVerifierW3F
   private readonly protocolRegistry: Map<
     StreamKind,
     NetworkingProtocol<unknown, unknown>
@@ -266,7 +270,7 @@ export class MainService extends BaseService {
 
     // Initialize event bus service first (required by networking protocols)
     this.eventBusService = new EventBusService()
-    this.ietfVerifier = new IETFVRFVerifierWasm()
+    this.ietfVerifier = new IETFVRFVerifierW3F()
     this.initNetworkingProtocols()
     this.initProtocolRegistry()
 

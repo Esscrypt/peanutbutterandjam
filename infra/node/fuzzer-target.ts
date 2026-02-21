@@ -12,7 +12,7 @@
  *   bun run fuzzer-target.ts --socket /tmp/jam_target.sock --spec tiny
  */
 
-import { mkdirSync, unlinkSync } from 'node:fs'
+import { appendFileSync, mkdirSync, unlinkSync } from 'node:fs'
 import { Server as UnixServer, type Socket as UnixSocket } from 'node:net'
 import * as path from 'node:path'
 import { config as loadEnv } from 'dotenv'
@@ -23,9 +23,10 @@ loadEnv({ path: path.join(path.dirname(process.execPath), '.env') })
 
 import {
   type IETFVRFVerifier,
-  IETFVRFVerifierWasm,
-  RingVRFProverWasm,
-  RingVRFVerifierWasm,
+  IETFVRFVerifierW3F,
+  type IETFVRFVerifierWasm,
+  RingVRFProverW3F,
+  RingVRFVerifierW3F,
 } from '@pbnjam/bandersnatch-vrf'
 import {
   decodeFuzzMessage,
@@ -125,6 +126,14 @@ let JAM_VERSION: JamVersion = DEFAULT_JAM_VERSION
 const APP_VERSION = { major: 0, minor: 7, patch: 2 }
 const APP_NAME = 'pbnj-fuzzer-target'
 
+// Memory profiling configuration
+// MEM_PROFILE_LOG: path to NDJSON output file (disabled if empty)
+// MEM_PROFILE_INTERVAL: sample every N blocks (default: 50)
+const MEM_PROFILE_LOG = process.env.MEM_PROFILE_LOG ?? ''
+const MEM_PROFILE_INTERVAL = process.env.MEM_PROFILE_INTERVAL
+  ? Number.parseInt(process.env.MEM_PROFILE_INTERVAL, 10)
+  : 50
+
 // Initialize all services
 let stateService: StateService
 let blockImporterService: BlockImporterService
@@ -134,8 +143,12 @@ let accumulationService: AccumulationService
 let workReportService: WorkReportService
 let clockService: ClockService
 let entropyService: EntropyService
+// Module-level refs for services created inside initializeServices, used by memory profiler
+let validatorSetManagerRef: ValidatorSetManager | undefined
+let statisticsServiceRef: StatisticsService | undefined
 let initialized = false
 let blockNumber = 0n // Track current block number for state root comparison
+let totalBlocksImported = 0 // Monotonic counter across all traces
 
 // Track previous state for comparison
 let previousStateKeyvals: Map<string, string> = new Map()
@@ -158,9 +171,9 @@ export function getConfigService(): ConfigService {
 }
 
 export async function initializeServices() {
-  let ringProver: RingVRFProverWasm
-  let ringVerifier: RingVRFVerifierWasm
-  let ietfVerifier: IETFVRFVerifier | IETFVRFVerifierWasm
+  let ringProver: RingVRFProverW3F
+  let ringVerifier: RingVRFVerifierW3F
+  let ietfVerifier: IETFVRFVerifier | IETFVRFVerifierWasm | IETFVRFVerifierW3F
   try {
     logger.info('Loading SRS file...')
     const srsFilePath = path.join(
@@ -178,9 +191,9 @@ export async function initializeServices() {
       throw new Error(`SRS file not found: ${srsFilePath}`)
     }
 
-    ringProver = new RingVRFProverWasm(srsFilePath)
-    ringVerifier = new RingVRFVerifierWasm(srsFilePath)
-    ietfVerifier = new IETFVRFVerifierWasm()
+    ringProver = new RingVRFProverW3F(srsFilePath)
+    ringVerifier = new RingVRFVerifierW3F(srsFilePath)
+    ietfVerifier = new IETFVRFVerifierW3F()
 
     try {
       // Add timeout to prevent hanging - WASM initialization can take time but shouldn't hang indefinitely
@@ -274,6 +287,7 @@ export async function initializeServices() {
       initialValidators: [],
     })
 
+    validatorSetManagerRef = validatorSetManager
     ticketService.setValidatorSetManager(validatorSetManager)
     sealKeyService.setValidatorSetManager(validatorSetManager)
     // TicketService epoch callbacks after SealKeyService so SealKeyService can use accumulator first (Gray Paper Eq. 202-207)
@@ -345,6 +359,7 @@ export async function initializeServices() {
       configService: configService,
       clockService: clockService,
     })
+    statisticsServiceRef = statisticsService
 
     accumulationService = new AccumulationService({
       configService: configService,
@@ -609,6 +624,8 @@ function resetForNewTrace(): void {
   stateService.clearAllStateForFuzzer()
   recentHistoryService.clearHistory()
   workReportService.clearPendingReports()
+  validatorSetManagerRef?.clearForFuzzer()
+  statisticsServiceRef?.resetForFuzzer()
 }
 
 const CHAPTER_10_KEY =
@@ -799,6 +816,82 @@ async function handleInitialize(
 }
 
 // Handle ImportBlock request
+/**
+ * Collects per-service data-structure sizes and process memory, then appends a
+ * NDJSON line to MEM_PROFILE_LOG.  Private fields are read via `as any` casts
+ * since this is diagnostic-only code that must not change production behaviour.
+ */
+function collectServiceProfile(timeslot: bigint): void {
+  if (!MEM_PROFILE_LOG) return
+  const mem = process.memoryUsage()
+  const mb = (bytes: number) =>
+    Number.parseFloat((bytes / 1_048_576).toFixed(2))
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const cm = chainManagerService as any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const vm = validatorSetManagerRef as any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rh = recentHistoryService as any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const wr = workReportService as any
+
+  const row = {
+    ts: new Date().toISOString(),
+    timeslot: Number(timeslot),
+    blocks_imported: totalBlocksImported,
+    process: {
+      rss_mb: mb(mem.rss),
+      heap_used_mb: mb(mem.heapUsed),
+      heap_total_mb: mb(mem.heapTotal),
+      external_mb: mb(mem.external),
+    },
+    chainManager: cm
+      ? {
+          blockNodes: cm.blockNodes?.size ?? -1,
+          equivocations: cm.equivocations?.size ?? -1,
+          lookupAnchors: cm.lookupAnchors?.length ?? -1,
+          pendingBlockRequests: cm.pendingBlockRequests?.size ?? -1,
+          pkToPendingStateRequest:
+            cm.publicKeyToPendingStateRequest?.size ?? -1,
+        }
+      : null,
+    validatorSet: vm
+      ? {
+          publicKeysToValidatorIndex: vm.publicKeysToValidatorIndex?.size ?? -1,
+          offenders: vm.offenders?.size ?? -1,
+          offenderEd25519Keys: vm.offenderEd25519Keys?.size ?? -1,
+          activeSet: vm.activeSet?.length ?? -1,
+          pendingSet: vm.pendingSet?.length ?? -1,
+          stagingSet: vm.stagingSet?.length ?? -1,
+        }
+      : null,
+    statistics: statisticsServiceRef
+      ? { serviceStats: statisticsServiceRef.getServiceStats().size }
+      : null,
+    recentHistory: rh
+      ? {
+          entries: rh.recentHistory?.length ?? -1,
+          mmrPeaks: rh.mmrPeaks?.length ?? -1,
+        }
+      : null,
+    workReport: wr
+      ? {
+          workReportsByHash: wr.workReportsByHash?.size ?? -1,
+          workReportState: wr.workReportState?.size ?? -1,
+          pendingWorkReports: wr.pendingWorkReports?.size ?? -1,
+          pendingGuarantees: wr.pendingGuarantees?.length ?? -1,
+        }
+      : null,
+  }
+
+  try {
+    appendFileSync(MEM_PROFILE_LOG, `${JSON.stringify(row)}\n`)
+  } catch {
+    // Non-fatal: don't let profiling break the fuzzer
+  }
+}
+
 async function handleImportBlock(
   socket: UnixSocket,
   importBlock: ImportBlock,
@@ -1162,6 +1255,15 @@ async function handleImportBlock(
 
     const encoded = encodeFuzzMessage(response, configService)
     sendMessage(socket, encoded)
+
+    totalBlocksImported++
+    if (
+      MEM_PROFILE_LOG &&
+      MEM_PROFILE_INTERVAL > 0 &&
+      totalBlocksImported % MEM_PROFILE_INTERVAL === 0
+    ) {
+      collectServiceProfile(blockNumber)
+    }
   } catch (error) {
     // Try to dump state keyvals even on error
     try {

@@ -527,6 +527,23 @@ export class ValidatorSetManager
   }
 
   /**
+   * Reset all in-memory state between fuzzer traces.
+   * Must be called whenever a new Initialize message is received so that
+   * validator-key mappings and offender sets from a previous trace do not
+   * bleed into the next one.
+   */
+  clearForFuzzer(): void {
+    this.publicKeysToValidatorIndex.clear()
+    this.offenders.clear()
+    this.offenderEd25519Keys = new Set()
+    this.activeSet = []
+    this.pendingSet = []
+    this.stagingSet = []
+    this.previousSet = []
+    this.preTransitionState = null
+  }
+
+  /**
    * Add validators to offenders set
    * These will be blacklisted during the next epoch transition
    */

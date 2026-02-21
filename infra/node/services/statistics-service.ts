@@ -191,6 +191,20 @@ export class StatisticsService extends BaseService {
   }
 
   /**
+   * Reset all accumulated statistics between fuzzer traces so that service-stat
+   * entries from a previous trace do not bleed into the next one.
+   */
+  resetForFuzzer(): void {
+    this.activity = {
+      validatorStatsAccumulator: this.createEmptyValidatorStats(),
+      validatorStatsPrevious: this.createEmptyValidatorStats(),
+      coreStats: this.createEmptyCoreStats(),
+      serviceStats: new Map(),
+    }
+    this.preTransitionActivity = null
+  }
+
+  /**
    * Get service statistics for specific service
    */
   getServiceStatsForService(serviceId: bigint): ServiceStats | null {

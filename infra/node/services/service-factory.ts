@@ -10,6 +10,7 @@
 import path from 'node:path'
 import {
   IETFVRFVerifier,
+  IETFVRFVerifierW3F,
   IETFVRFVerifierWasm,
   RingVRFProverW3F,
   RingVRFProverWasm,
@@ -122,6 +123,8 @@ export interface ServiceFactoryOptions {
 
   /** Use WASM for IETF VRF (true = IETFVRFVerifierWasm, false = IETFVRFVerifier) */
   useIetfVrfWasm?: boolean
+  /** Use Rust (native) for IETF VRF (true = IETFVRFVerifierW3F, false = IETFVRFVerifier) */
+  useIetfVrfW3F?: boolean
   /** Trace subfolder for debugging */
   traceSubfolder?: string
   /** Node ID for metrics (defaults to random) */
@@ -212,7 +215,7 @@ export interface ServiceContext {
   }
 
   // IETF VRF
-  ietfVerifier: IETFVRFVerifier | IETFVRFVerifierWasm
+  ietfVerifier: IETFVRFVerifier | IETFVRFVerifierWasm | IETFVRFVerifierW3F
 }
 
 /**
@@ -293,7 +296,7 @@ export async function createCoreServices(
 
   let ringProver: RingVRFProverWasm | RingVRFProverW3F
   let ringVerifier: RingVRFVerifierWasm | RingVRFVerifierW3F
-  let ietfVerifier: IETFVRFVerifier | IETFVRFVerifierWasm
+  let ietfVerifier: IETFVRFVerifier | IETFVRFVerifierWasm | IETFVRFVerifierW3F
   if (useRingVrfWasm) {
     const result = await initializeRingVrf(srsFilePath)
     ringProver = result.prover
@@ -316,6 +319,8 @@ export async function createCoreServices(
 
   if (options.useIetfVrfWasm) {
     ietfVerifier = new IETFVRFVerifierWasm()
+  } else if (options.useIetfVrfW3F) {
+    ietfVerifier = new IETFVRFVerifierW3F()
   } else {
     ietfVerifier = new IETFVRFVerifier()
   }

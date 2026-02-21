@@ -731,6 +731,9 @@ export class ChainManagerService
     // add child to parent block node
     parentNode.children.add(blockHash)
 
+    // Prune nodes older than maxLookupAnchorage so blockNodes does not grow unboundedly
+    this.pruneBlockNodes(block.header.timeslot)
+
     // Update lookup anchors with the newly imported block
     // Gray Paper: The lookup anchor list should contain headers within the last L slots
     // Add the new block at the beginning (most recent first)
@@ -1043,6 +1046,28 @@ export class ChainManagerService
   // ============================================================================
   // Private Methods
   // ============================================================================
+
+  /**
+   * Remove blockNodes whose slot falls strictly before the expunge window.
+   *
+   * Nodes at slot 0 (genesis / ancestry placeholders) are always kept because
+   * they are lightweight and serve as traversal roots.  All other nodes whose
+   * slot is older than `currentSlot - maxLookupAnchorage` can no longer be
+   * valid parents for incoming blocks (any fork diverging that far back is
+   * rightly rejected) and their stateSnapshots would otherwise consume
+   * unbounded memory when running long chains.
+   */
+  private pruneBlockNodes(currentSlot: bigint): void {
+    const maxAge = BigInt(this.configService.maxLookupAnchorage)
+    if (currentSlot <= maxAge) return
+
+    const minValidSlot = currentSlot - maxAge
+    for (const [hash, node] of this.blockNodes) {
+      if (node.slot > 0n && node.slot < minValidSlot) {
+        this.blockNodes.delete(hash)
+      }
+    }
+  }
 
   private hashBlock(header: BlockHeader): Hex {
     const [error, hash] = calculateBlockHashFromHeader(
