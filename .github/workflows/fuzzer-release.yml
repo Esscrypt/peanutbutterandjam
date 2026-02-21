@@ -22,6 +22,9 @@ jobs:
         run: |
           git submodule update --init --depth 1 packages/bandersnatch
           git submodule update --init --depth 1 packages/bandersnatch-vrf
+          # ark-vrf is a nested submodule inside bandersnatch-vrf; required to
+          # compile the ring-proof + IETF VRF native Rust module.
+          git -C packages/bandersnatch-vrf submodule update --init --depth 1 submodules/ark-vrf
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -42,16 +45,34 @@ jobs:
       - name: Build dependencies
         run: bun run build
 
+      - name: Build bandersnatch-vrf native (ring proof + IETF VRF)
+        # The turbo build above compiles TypeScript only; this step explicitly
+        # builds the napi-rs native addon (RingVRFProverW3F / IETFVRFProverW3F).
+        run: bun run --cwd packages/bandersnatch-vrf build:native
+
       - name: Build fuzzer target binary
         run: bun run build:fuzzer
+
+      - name: Copy bandersnatch-vrf native to bin
+        # The compiled binary resolves `require('../../rust-ring-proof/native')`
+        # from the virtual source path packages/bandersnatch-vrf/src/prover/,
+        # so the .node file must live at the corresponding relative location
+        # inside bin/ to be found at runtime.
+        run: |
+          mkdir -p bin/packages/bandersnatch-vrf/rust-ring-proof/native
+          cp packages/bandersnatch-vrf/rust-ring-proof/native/*.node \
+             bin/packages/bandersnatch-vrf/rust-ring-proof/native/
+          cp packages/bandersnatch-vrf/rust-ring-proof/native/index.js \
+             bin/packages/bandersnatch-vrf/rust-ring-proof/native/
 
       - name: Create checksum
         run: |
           sha256sum bin/fuzzer-target > bin/fuzzer-target.sha256
 
-      - name: Create full bin bundle (binary + native addon + .env)
+      - name: Create full bin bundle (binary + native addons + .env)
         run: |
-          tar czvf bin/fuzzer-target-bin.tar.gz -C bin fuzzer-target native .env fuzzer-target.sha256
+          tar czvf bin/fuzzer-target-bin.tar.gz -C bin \
+            fuzzer-target native packages .env fuzzer-target.sha256
           sha256sum bin/fuzzer-target-bin.tar.gz > bin/fuzzer-target-bin.tar.gz.sha256
 
       - name: Checkout releases repository
@@ -97,15 +118,19 @@ jobs:
           name: Fuzzer Target ${{ github.sha }}
           body: |
             Fuzzer target binary built from commit ${{ github.sha }}
-            
+
             ## Usage
-            
+
             ```bash
             tar xzvf fuzzer-target-bin.tar.gz
             ./fuzzer-target --socket /tmp/jam_target.sock --spec tiny
             ```
-            
-            Bundle includes: binary, Rust native addon (`native/`), and default `.env`.
+
+            Bundle includes:
+            - `fuzzer-target` — compiled binary
+            - `native/` — PVM Rust native addon (`pbnjam_pvm_rust`)
+            - `packages/bandersnatch-vrf/rust-ring-proof/native/` — Ring VRF + IETF VRF Rust native addon (`pbnjam_ring_proof`, enables `RingVRFProverW3F` / `IETFVRFProverW3F`)
+            - `.env` — default environment configuration
           draft: false
           prerelease: true
           files: |

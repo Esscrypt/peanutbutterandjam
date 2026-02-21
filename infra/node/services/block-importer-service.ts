@@ -13,6 +13,7 @@
 
 import type {
   IETFVRFVerifier,
+  IETFVRFVerifierW3F,
   IETFVRFVerifierWasm,
 } from '@pbnjam/bandersnatch-vrf'
 import {
@@ -91,7 +92,10 @@ export class BlockImporterService
   private readonly authPoolService: AuthPoolService
   private readonly accumulationService: AccumulationService
   private readonly workReportService: WorkReportService
-  private readonly ietfVerifier: IETFVRFVerifier | IETFVRFVerifierWasm
+  private readonly ietfVerifier:
+    | IETFVRFVerifier
+    | IETFVRFVerifierWasm
+    | IETFVRFVerifierW3F
   constructor(options: {
     eventBusService: EventBusService
     clockService: ClockService
@@ -110,7 +114,7 @@ export class BlockImporterService
     authPoolService: AuthPoolService
     accumulationService: AccumulationService
     workReportService: WorkReportService
-    ietfVerifier: IETFVRFVerifier | IETFVRFVerifierWasm
+    ietfVerifier: IETFVRFVerifier | IETFVRFVerifierWasm | IETFVRFVerifierW3F
   }) {
     super('block-importer-service')
     this.eventBusService = options.eventBusService
